@@ -1,0 +1,13 @@
+# Supabase local config. `project_id` is just a local label; link to a
+# real project with: supabase link --project-ref <your-ref>
+project_id = "replyloop"
+
+[functions.freshdesk-webhook]
+# Freshdesk posts here with no Supabase JWT, so don't require one.
+verify_jwt = false
+
+[functions.process-ticket]
+verify_jwt = true
+
+[functions.send-reply]
+verify_jwt = true
