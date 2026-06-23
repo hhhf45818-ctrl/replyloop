@@ -12,7 +12,7 @@
 
 import { NextResponse } from "next/server";
 import { encrypt } from "@/lib/crypto";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin, isSupabaseConfigured } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
@@ -29,11 +29,11 @@ function normalizeDomain(domain: string): string {
 }
 
 function webhookUrl(userId: string): string | null {
+  // Only meaningful once Supabase is configured — the inbound pipeline
+  // lives in the Supabase edge function, not on Vercel.
+  if (!isSupabaseConfigured()) return null;
   const q = `?user_id=${encodeURIComponent(userId)}`;
-  const supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (supaUrl) return `${supaUrl}/functions/v1/freshdesk-webhook${q}`;
-  const site = process.env.NEXT_PUBLIC_SITE_URL;
-  return site ? `${site}/api/freshdesk-webhook${q}` : null;
+  return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/freshdesk-webhook${q}`;
 }
 
 export async function POST(req: Request) {
@@ -73,26 +73,38 @@ export async function POST(req: Request) {
     );
   }
 
-  // ── 2. Encrypt + persist credentials ──
-  try {
-    const supabase = supabaseAdmin();
-    const { error } = await supabase.from("settings").upsert(
-      {
-        user_id: userId,
-        freshdesk_domain: host,
-        freshdesk_key_encrypted: encrypt(key),
-      },
-      { onConflict: "user_id" }
-    );
-    if (error) {
-      return NextResponse.json(
-        { ok: false, error: `Could not save settings: ${error.message}` },
-        { status: 200 }
+  // ── 2. Encrypt + persist credentials (only if Supabase is set up) ──
+  // The front-end always saves the credentials locally; Supabase is
+  // optional and only needed for the automated inbound pipeline.
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = supabaseAdmin();
+      const { error } = await supabase.from("settings").upsert(
+        {
+          user_id: userId,
+          freshdesk_domain: host,
+          freshdesk_key_encrypted: encrypt(key),
+        },
+        { onConflict: "user_id" }
       );
+      if (error) {
+        return NextResponse.json(
+          { ok: false, error: `Could not save settings: ${error.message}` },
+          { status: 200 }
+        );
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Backend error";
+      return NextResponse.json({ ok: false, error: msg }, { status: 200 });
     }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Backend not configured";
-    return NextResponse.json({ ok: false, error: msg }, { status: 200 });
+  } else {
+    // No Supabase yet — the Freshdesk credentials are valid and saved
+    // locally by the client. Report success without the automated pipeline.
+    return NextResponse.json({
+      ok: true,
+      message: `Connected to ${host}. Saved locally — connect Supabase later to enable automatic replies.`,
+      webhookUrl: null,
+    });
   }
 
   // ── 3. Best-effort webhook registration ──

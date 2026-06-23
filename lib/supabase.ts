@@ -14,6 +14,24 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 /**
+ * True only when Supabase env vars look like a real project (a valid
+ * http(s) URL, not the "placeholder" we ship before a project exists).
+ * Lets the app run fully without Supabase configured.
+ */
+export function isSupabaseConfigured(): boolean {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return false;
+  if (url === "placeholder" || serviceKey === "placeholder") return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Browser/anon Supabase client. Safe to use from Client Components.
  * Returns a singleton so we don't create a new connection per render.
  */
